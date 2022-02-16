@@ -11,7 +11,7 @@ scooby_state_num_bits = 10
 scooby_seed = 200
 scooby_policy = "EGreedy"
 scooby_learning_type = "SARSA"
-scooby_actions = [1,3,4,5,10,11,12,22,23,30,32,-1,-3,-6,0]
+#scooby_actions = [1,3,4,5,10,11,12,22,23,30,32,-1,-3,-6,0]
 scooby_max_actions = 64
 scooby_pt_size = 256
 scooby_st_size = 64
@@ -115,7 +115,7 @@ class Prefetcher:
 		return self.type 
 
 class Scooby(Prefetcher): # child of class prefetcher
-	def __init__(self):
+	def __init__(self, scooby_actions):
 		self.signature_table = deque([])
 		self.prefetch_tracker = deque([])
 		self.last_evicted_tracker = None
