@@ -253,8 +253,9 @@ def build_and_train_network(benchmark, args):
                     print('\tLearning rate dacayed to {:.7f}'.format(learning_rate))
 
             ## PYTHIA ##
-            reinforcement = pythia.Scooby()
             counter = 0
+            offset_jump_dict = {}
+            scooby_actions = []
 
             #print("here2..")
             for ii, (batch_pc_in, batch_page_in, batch_offset_in, batch_page_out, batch_offset_out) in enumerate(get_batches(train_pc_in, train_page_in, train_offset_in, train_page_out, train_offset_out, batch_size, num_steps, pc_localization), 1):
@@ -280,9 +281,14 @@ def build_and_train_network(benchmark, args):
 
                     pred_from_offset = batch_offset_in[j][-1]
                     actual_offset = batch_offset_in[j+1][-1]
+                    jump = actual_offset - pred_from_offset
+                    if jump in offset_jump_dict:
+                        offset_jump_dict[jump] += 1
+                    else:
+                        offset_jump_dict[jump] = 1
 
 
-
+                    '''
                     tmp = []
                     test_pc = batch_pc_in[j][0]
                     test_page = rev_unique_pages[pred_from_page]
@@ -294,6 +300,7 @@ def build_and_train_network(benchmark, args):
 
                     if (counter%1000000 == 0):
                         print("Reached" + str(counter))
+                    '''
 
 
 
@@ -304,6 +311,22 @@ def build_and_train_network(benchmark, args):
                         #if (count%1000==0):
                             #print ("Loop 2:", count)
                         baseline_dict[(page_in[-1], offset_in[-1])] = (page_out, offset_out)
+
+
+
+            ### PYTHIA ###
+            rev_sort_offset_jump_dict = sorted(offset_jump_dict.items(), key = lambda x : x[1], reverse = 1)
+            for keys in sorted(rev_sort_offset_jump_dict):
+                scooby_actions.append(keys[0])
+                if len(scooby_actions) == 15:
+                    break
+
+            print(scooby_actions)
+            print('\n\n')
+
+            ####
+
+
 
             #print("here3")
             time_elapsed = datetime.now() - start_time
@@ -329,7 +352,9 @@ def build_and_train_network(benchmark, args):
 
 
             # PYTHIA #
+            reinforcement = pythia.Scooby(scooby_actions)
             pref_addr = []
+            all_test_cnt = 0
             correct_predictions = 0
 
 
@@ -382,6 +407,7 @@ def build_and_train_network(benchmark, args):
                     if pref_page == actual_page and pref_offset == actual_offset:
                         correct_predictions += 1
                     counter += 1
+                    all_test_cnt += 1
 
                     write_file2.write(str(test_pc) + " " + str(test_page) + " " + str(pref_page) + " " + str(test_offset) + " " + str(pref_offset) + "\n")
 
@@ -418,7 +444,9 @@ def build_and_train_network(benchmark, args):
             print('\tTime elapsed (hh:mm:ss.ms) {}'.format(time_elapsed))
             print('\tBest acc: {:.3f}'.format(max(accs)))
 
-            print("Accuracy of Pythia is : {}".format(correct_predictions/all_test_cnt))
+            print("Accuracy of Pythia is : {} \n\n".format(correct_predictions/all_test_cnt))
+
+            print(reinforcement.stats)
 
 
 
