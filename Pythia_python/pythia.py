@@ -158,7 +158,7 @@ class Scooby(Prefetcher): # child of class prefetcher
 
 					  'correct_timely' : 0, 'correct_untimely' : 0, 'no_pref' : 0, 
 					  'incorrect' : 0, 'out_of_bounds' : 0, 'tracker_hit' : 0, 
-					  'dist' : [[0] * (16)] * (64) # define MAX_ACTIONS 64 define MAX_REWARDS 16
+					  'dist' : [[0] * (16)] * (64) # define MAX_ACTIONS 64 define MAX_REWARDS 16 , 16 cols 64 rows
 
 					},
 
@@ -174,7 +174,9 @@ class Scooby(Prefetcher): # child of class prefetcher
 
 		'ipc' : {'epochs' : 0, 'histogram' : [0]*4}, #define SCOOBY_MAX_IPC_LEVEL 4
 
-		'cache_acc' : {'epochs' : 0, 'histogram' : [0]*10} #define CACHE_ACC_LEVELS 10
+		'cache_acc' : {'epochs' : 0, 'histogram' : [0]*10}, #define CACHE_ACC_LEVELS 10
+
+		'debug' : {'reward_dist_increment_cnt' : 0}
 
 		}
 
@@ -347,7 +349,7 @@ class Scooby(Prefetcher): # child of class prefetcher
 				last_evicted.reward, curr_evicted.state, curr_evicted.action_index,
 				last_evicted.consensus_vec, last_evicted.reward_type)
 
-
+		return curr_evicted
 
 
 
@@ -434,39 +436,38 @@ class Scooby(Prefetcher): # child of class prefetcher
 
 		size = len(ptentries)
 
-		for index in range(size):
-			ptentry = ptentries[index]
+		for index in ptentries:
+			#ptentry = ptentries[index]
 			self.stats['reward']['demand']['pt_found_total'] += 1
 
-			if ptentry.has_reward:
+			if self.prefetch_tracker[index].has_reward:
 				self.stats['reward']['demand']['has_reward'] += 1
 				return
 
-			if ptentry.is_filled:
-				self.assign_reward(ptentry, RewardType['correct_timely'])
+			if self.prefetch_tracker[index].is_filled:
+				self.assign_reward(index, RewardType['correct_timely'])
 
 			else:
-				self.assign_reward(ptentry, RewardType['correct_untimely'])
+				self.assign_reward(index, RewardType['correct_untimely'])
 
-			ptentry.has_reward = True
+			self.prefetch_tracker[index].has_reward = True
 
 	def reward_pt(self, ptentry):
 		self.stats['reward']['train']['called'] += 1
 		assert not ptentry.has_reward
 
 		if ptentry.address == 0xdeadbeef: # no prefetch
-			self.assign_reward(ptentry, RewardType['none'])
+			ptentry = self.assign_reward_pt(ptentry, RewardType['none'])
 		else: # incorrect prefetch
-			self.assign_reward(ptentry, RewardType['incorrect'])
+			ptentry = self.assign_reward_pt(ptentry, RewardType['incorrect'])
 
 		ptentry.has_reward = True
 		return ptentry
 
-
-	def assign_reward(self, ptentry, type):
+	def assign_reward_pt(self, ptentry, type):
 		assert not ptentry.has_reward
 
-		reward = self.compute_reward(ptentry, type)
+		reward = self.compute_reward(type)
 
 		ptentry.reward = reward
 		ptentry.reward_type = type
@@ -495,10 +496,48 @@ class Scooby(Prefetcher): # child of class prefetcher
 		else:
 			assert False
 
+		self.stats['debug']['reward_dist_increment_cnt'] += 1
 		self.stats['reward']['dist'][ptentry.action_index][type] += 1
 
+		return ptentry
 
-	def compute_reward(self, ptentry, type):
+	def assign_reward(self, idx, type):
+		assert not self.prefetch_tracker[idx].has_reward
+
+		reward = self.compute_reward(type)
+
+		self.prefetch_tracker[idx].reward = reward
+		self.prefetch_tracker[idx].reward_type = type
+		self.prefetch_tracker[idx].has_reward = True 
+
+		self.stats['reward']['assign_reward']['called'] += 1
+
+		if type == RewardType['correct_timely']:
+			self.stats['reward']['correct_timely'] += 1
+
+		elif type == RewardType['correct_untimely']:
+			self.stats['reward']['correct_untimely'] += 1
+
+		elif type == RewardType['incorrect']:
+			self.stats['reward']['incorrect'] += 1
+
+		elif type == RewardType['none']:
+			self.stats['reward']['no_pref'] += 1
+
+		elif type == RewardType['out_of_bounds']:
+			self.stats['reward']['out_of_bounds'] += 1
+
+		elif type == RewardType['tracker_hit']:
+			self.stats['reward']['tracker_hit'] += 1
+
+		else:
+			assert False
+
+		self.stats['debug']['reward_dist_increment_cnt'] += 1
+		self.stats['reward']['dist'][self.prefetch_tracker[idx].action_index][type] += 1
+
+
+	def compute_reward(self, type):
 		high_bw = None 
 		if scooby_enable_hbw_reward and self.is_high_bw():
 			high_bw = True 
@@ -565,7 +604,7 @@ class Scooby(Prefetcher): # child of class prefetcher
 
 		for index in range (size):
 			if self.prefetch_tracker[index].address == address:
-				entries.append(self.prefetch_tracker[index])
+				entries.append(index)
 				if not search_all:
 					break
 
@@ -596,7 +635,7 @@ class ActionTracker:
 
 class Scooby_STEntry:
 	def __init__(self, page, pc, offset):
-		self.page = 0
+		self.page = page
 		self.pcs = deque([pc])
 		self.offsets = deque([offset])
 		self.deltas = deque([])
@@ -614,7 +653,7 @@ class Scooby_STEntry:
 
 		self.total_prefetches = 0
 
-		self.unique_pcs.add(pc)
+		#self.unique_pcs.add(pc)
 		self.bmp_real[offset] = 1
 
 	def update(self, page, pc, offset, address):
@@ -735,9 +774,8 @@ class Scooby_STEntry:
 				it = i
 				break
 
-		tmp = self.action_tracker[it]
-
 		if it != -1:
+			tmp = self.action_tracker[it]
 			self.action_tracker[it].conf += 1
 			self.action_tracker.remove(tmp)
 			self.action_tracker.append(tmp)
@@ -746,7 +784,6 @@ class Scooby_STEntry:
 			if len(self.action_tracker) >= scooby_action_tracker_size:
 				self.action_tracker.popleft()
 			self.action_tracker.append(ActionTracker(pref_offset, 0))
-
 
 class State:
 	def __init__(self):
